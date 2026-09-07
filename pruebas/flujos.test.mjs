@@ -15,6 +15,7 @@ import { calcularAlertas, TIPOS_ALERTA, vencimientosProximos } from '../src/dato
 import { hoyISO } from '../src/datos/tiempo.js';
 import {
   compromisos as selCompromisos,
+  compromisosEnVentana,
   historialArea,
   historialProyecto,
   proyectoPorId,
@@ -24,6 +25,7 @@ import {
   serieAvance,
   temasDe,
   ultimaActualizacion,
+  ventanaSeguimiento,
   activos,
 } from '../src/datos/selectores.js';
 
@@ -45,10 +47,10 @@ async function limpio() {
 
 const PROYECTO_BASE = {
   proyecto: 'Repavimentación — Barrio de prueba',
-  area: 'Secretaría de Obras Públicas',
-  id_area: 'ar_obras',
+  area: 'Secretaría de Obras',
+  id_area: 'ar_r_obras',
   programa: 'Infraestructura urbana',
-  eje: 'Desarrollo urbano',
+  eje: 'POA',
   tipo: 'Obra',
   unidad: 'cuadras',
   objetivo: 100,
@@ -327,6 +329,206 @@ test('editar un tema mantiene su compromiso en sincronía', async () => {
   assert.equal(selCompromisos(bd, {}).length, 0, 'deja de contar en la lista general');
 });
 
+/**
+ * "Crear nuevo compromiso" puede llevar una descripción propia, distinta de
+ * la del tema — si no se carga, se sigue usando la del tema como antes.
+ */
+test('el compromiso creado desde un tema usa su propia descripción si se cargó', async () => {
+  await limpio();
+  const m = await repo.crearMonitoreo({ fecha: HOY, area: 'Secretaría de Salud' });
+
+  const { compromiso: conPropia } = await repo.agregarTema(m.id, {
+    categoria: 'Presupuestario', descripcion: 'Falta la partida para pagar al proveedor',
+    criticidad: 'media', requiere_accion: true, responsable: 'M. López', fecha_limite: FUTURO,
+    descripcion_compromiso: 'Gestionar la partida presupuestaria',
+  });
+  assert.equal(conPropia.descripcion, 'Gestionar la partida presupuestaria');
+
+  const { compromiso: sinPropia } = await repo.agregarTema(m.id, {
+    categoria: 'Presupuestario', descripcion: 'Otro tema sin descripción propia',
+    criticidad: 'media', requiere_accion: true, responsable: 'M. López', fecha_limite: FUTURO,
+  });
+  assert.equal(sinPropia.descripcion, 'Otro tema sin descripción propia');
+});
+
+/**
+ * `id_compromiso` tiene dos sentidos distintos, y `actualizarTema` tiene que
+ * distinguirlos: el compromiso que el tema generó (dueño, se gestiona en
+ * sincronía) versus uno que ya existía y el tema sólo referencia (no es
+ * dueño, nunca lo toca).
+ */
+test('un tema vinculado a un compromiso ya existente nunca gestiona su ciclo de vida', async () => {
+  await limpio();
+  const p = await repo.crearProyecto(PROYECTO_BASE);
+  const m = await repo.crearMonitoreo({ fecha: HOY, area: p.area });
+  const seg = await repo.crearSeguimiento({ ids_proyecto: [p.id_proyecto], area: p.area, fecha: PASADO, tipo: 'realizado' });
+
+  // El compromiso existe independientemente del tema: lo crea otro camino
+  // (acá, un seguimiento) antes de que el tema lo referencie.
+  const existente = await repo.crearCompromiso({
+    origen_tipo: 'seguimiento', id_origen: seg.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Pagar al proveedor', responsable: 'V. Juárez', fecha_limite: FUTURO,
+  });
+
+  const { tema } = await repo.agregarTema(m.id, {
+    categoria: 'Operativo', descripcion: 'Sigue sin pagarse', criticidad: 'media',
+    requiere_accion: false, id_proyecto: p.id_proyecto,
+    id_compromiso: existente.id, compromiso_existente: true,
+  });
+  assert.equal(tema.id_compromiso, existente.id);
+
+  // Editar el tema (sin tocar el vínculo) no le pisa la descripción al
+  // compromiso: no es dueño de él.
+  await repo.actualizarTema(tema.id, {
+    descripcion: 'Sigue sin pagarse, avisado dos veces',
+    id_compromiso: existente.id,
+    compromiso_existente: true,
+  });
+  let bd = await repo.obtenerBD();
+  assert.equal(bd.compromisos.find((c) => c.id === existente.id).descripcion, 'Pagar al proveedor');
+  assert.equal(bd.compromisos.find((c) => c.id === existente.id).activo, true);
+
+  // Sacar el vínculo tampoco lo toca: el compromiso sigue vivo, sólo deja
+  // de estar referenciado por este tema.
+  const sinVinculo = await repo.actualizarTema(tema.id, { id_compromiso: null, compromiso_existente: false });
+  bd = await repo.obtenerBD();
+  assert.equal(sinVinculo.id_compromiso, null);
+  assert.equal(bd.compromisos.find((c) => c.id === existente.id).activo, true, 'el compromiso ajeno no se da de baja');
+  assert.equal(selCompromisos(bd, {}).length, 1, 'sigue contando en la lista general');
+});
+
+test('cambiar de un compromiso propio a uno ya existente da de baja el propio, no el ajeno', async () => {
+  await limpio();
+  const p = await repo.crearProyecto(PROYECTO_BASE);
+  const m = await repo.crearMonitoreo({ fecha: HOY, area: p.area });
+  const seg = await repo.crearSeguimiento({ ids_proyecto: [p.id_proyecto], area: p.area, fecha: PASADO, tipo: 'realizado' });
+  const ajeno = await repo.crearCompromiso({
+    origen_tipo: 'seguimiento', id_origen: seg.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Inspección final', responsable: 'L. Gómez', fecha_limite: FUTURO,
+  });
+
+  // `tema` es una foto de ANTES de que agregarTema le asigne el compromiso
+  // propio — por eso se usa el `compromiso` que la misma función devuelve
+  // aparte, no `tema.id_compromiso`.
+  const { tema, compromiso: propio } = await repo.agregarTema(m.id, {
+    categoria: 'Operativo', descripcion: 'Falta un insumo', criticidad: 'media',
+    requiere_accion: true, responsable: 'M. López', fecha_limite: FUTURO, id_proyecto: p.id_proyecto,
+  });
+  assert.ok(propio, 'requiere_accion generó su propio compromiso');
+
+  // El mismo tema pasa a apuntar al compromiso ajeno en vez del propio.
+  await repo.actualizarTema(tema.id, {
+    requiere_accion: false,
+    id_compromiso: ajeno.id,
+    compromiso_existente: true,
+  });
+  const bd = await repo.obtenerBD();
+  assert.equal(bd.compromisos.find((c) => c.id === propio.id).activo, false, 'el propio, huérfano, se da de baja');
+  assert.equal(bd.compromisos.find((c) => c.id === ajeno.id).activo, true, 'el ajeno queda intacto');
+});
+
+/**
+ * "Actualizar compromiso" (Monitoreo) y el detalle desplegable de
+ * Seguimiento comparten este camino: corregir estado y descripción de un
+ * compromiso sin pasar por su origen. `fecha_cumplimiento` se administra
+ * sola, no la manda quien llama.
+ */
+test('actualizarEstadoCompromiso estampa y limpia la fecha de cumplimiento sola', async () => {
+  await limpio();
+  const p = await repo.crearProyecto(PROYECTO_BASE);
+  const m = await repo.crearMonitoreo({ fecha: HOY, area: p.area });
+  const c = await repo.crearCompromiso({
+    origen_tipo: 'monitoreo', id_origen: m.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Elevar el expediente', responsable: 'R. Ferreyra', fecha_limite: FUTURO,
+  });
+  assert.equal(c.estado, 'pendiente');
+
+  const cumplido = await repo.actualizarEstadoCompromiso(
+    c.id, { estado: 'cumplido', descripcion: 'Expediente firmado' }, HOY,
+  );
+  assert.equal(cumplido.estado, 'cumplido');
+  assert.equal(cumplido.descripcion, 'Expediente firmado');
+  assert.equal(cumplido.fecha_cumplimiento, HOY);
+
+  // Volver para atrás limpia la fecha: no puede quedar "cumplido el HOY"
+  // colgando de un compromiso que ya no lo está.
+  const reabierto = await repo.actualizarEstadoCompromiso(
+    c.id, { estado: 'en curso', descripcion: 'Expediente firmado' }, HOY,
+  );
+  assert.equal(reabierto.estado, 'en curso');
+  assert.equal(reabierto.fecha_cumplimiento, null);
+
+  // Corregir sólo la descripción, sin tocar el estado, no pisa una fecha de
+  // cumplimiento que ya estuviera cargada de antes.
+  const conFecha = await repo.actualizarCompromiso(c.id, { fecha_cumplimiento: PASADO });
+  assert.equal(conFecha.estado, 'en curso');
+  const soloDescripcion = await repo.actualizarEstadoCompromiso(
+    c.id, { estado: 'en curso', descripcion: 'Texto corregido' }, HOY,
+  );
+  assert.equal(soloDescripcion.fecha_cumplimiento, PASADO);
+});
+
+/**
+ * La ventana de seguimiento de un área —lo que muestra la Parte 2 de la
+ * carga de Monitoreo— sale de sus propios seguimientos, nunca de una fecha
+ * fija: cada secretaría agenda la suya.
+ */
+test('ventanaSeguimiento trae el último realizado y el próximo programado del área, cada uno por su cuenta', async () => {
+  await limpio();
+  const p = await repo.crearProyecto(PROYECTO_BASE);
+  await repo.crearSeguimiento({ ids_proyecto: [p.id_proyecto], area: p.area, fecha: PASADO, tipo: 'realizado' });
+  await repo.crearSeguimiento({ ids_proyecto: [p.id_proyecto], area: p.area, fecha: AYER, tipo: 'realizado' });
+  await repo.crearSeguimiento({ ids_proyecto: [p.id_proyecto], area: p.area, fecha: FUTURO, tipo: 'programado' });
+  // Un "programado" vencido (nunca se marcó realizado) no cuenta como próximo.
+  await repo.crearSeguimiento({ ids_proyecto: [p.id_proyecto], area: p.area, fecha: PASADO, tipo: 'programado' });
+
+  const bd = await repo.obtenerBD();
+  const ventana = ventanaSeguimiento(bd, p.area, HOY);
+  assert.equal(ventana.ultimo.fecha, AYER, 'el último realizado es el más reciente, no cualquiera');
+  assert.equal(ventana.proximo.fecha, FUTURO);
+
+  // Otra área, sin seguimientos: los dos lados quedan en null, no en un dato inventado.
+  const vacia = ventanaSeguimiento(bd, 'Secretaría de Salud', HOY);
+  assert.equal(vacia.ultimo, null);
+  assert.equal(vacia.proximo, null);
+});
+
+test('compromisosEnVentana filtra por fecha límite, sin límite del lado que falta', async () => {
+  await limpio();
+  const p = await repo.crearProyecto(PROYECTO_BASE);
+  const m = await repo.crearMonitoreo({ fecha: HOY, area: p.area });
+  const antes = await repo.crearCompromiso({
+    origen_tipo: 'monitoreo', id_origen: m.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Vence antes de la ventana', responsable: 'A', fecha_limite: PASADO,
+  });
+  const dentro = await repo.crearCompromiso({
+    origen_tipo: 'monitoreo', id_origen: m.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Vence dentro de la ventana', responsable: 'B', fecha_limite: HOY,
+  });
+  const despues = await repo.crearCompromiso({
+    origen_tipo: 'monitoreo', id_origen: m.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Vence después de la ventana', responsable: 'C', fecha_limite: FUTURO,
+  });
+  const sinFecha = await repo.crearCompromiso({
+    origen_tipo: 'monitoreo', id_origen: m.id, id_proyecto: p.id_proyecto,
+    area: p.area, descripcion: 'Sin fecha límite', responsable: 'D', fecha_limite: null,
+  });
+
+  const bd = await repo.obtenerBD();
+  const ventana = { ultimo: { fecha: AYER }, proximo: { fecha: HOY } };
+  const ids = compromisosEnVentana(bd, p.id_proyecto, ventana, HOY).map((c) => c.id);
+  assert.ok(ids.includes(dentro.id));
+  assert.ok(ids.includes(sinFecha.id), 'sin fecha límite no lo excluye ninguna ventana');
+  assert.ok(!ids.includes(antes.id));
+  assert.ok(!ids.includes(despues.id));
+
+  // Sin ventana de un lado (nunca hubo un seguimiento anterior, por ejemplo),
+  // ese lado no filtra nada.
+  const sinPiso = compromisosEnVentana(bd, p.id_proyecto, { ultimo: null, proximo: { fecha: HOY } }, HOY).map((c) => c.id);
+  assert.ok(sinPiso.includes(antes.id));
+  assert.ok(!sinPiso.includes(despues.id));
+});
+
 /* ── Flujo del módulo 5: mesa con compromisos ───────────────────────── */
 
 test('los compromisos de una mesa entran a la lista general con origen mesa', async () => {
@@ -339,7 +541,7 @@ test('los compromisos de una mesa entran a la lista general con origen mesa', as
   await repo.crearCompromisos([
     {
       origen_tipo: 'mesa', id_origen: mesa.id, id_proyecto: null,
-      area: 'Secretaría de Servicios Públicos', descripcion: 'Relevar luminarias',
+      area: 'Secretaría de Ambiente y Servicios Públicos', descripcion: 'Relevar luminarias',
       responsable: 'T. Ojeda', fecha_limite: FUTURO,
     },
   ]);
@@ -356,7 +558,7 @@ test('confirmar requerimientos sube el porcentaje y apaga la alerta del evento',
   await limpio();
   const evento = await repo.crearEvento({
     nombre: 'Feria de prueba', fecha: '2026-08-11', hora: '10:00', lugar: 'Plaza',
-    area_organizadora: 'Subsecretaría de Cultura', tipo: 'Feria', estado: 'confirmado', id_proyecto: null,
+    area_organizadora: 'Secretaría de Capital Humano', tipo: 'Feria', estado: 'confirmado', id_proyecto: null,
   });
   const r1 = await repo.crearRequerimiento({ id_evento: evento.id, item: 'Sonido', cantidad: 1, area_responsable: 'X' });
   await repo.crearRequerimiento({ id_evento: evento.id, item: 'Sillas', cantidad: 50, area_responsable: 'X', estado: 'confirmado' });
@@ -520,7 +722,7 @@ test('una importación en lote escribe y notifica una sola vez', async () => {
   });
 
   const filas = Array.from({ length: 25 }, (_, i) => ({
-    area: 'Secretaría de Obras Públicas',
+    area: 'Secretaría de Obras',
     proyecto: `Proyecto importado ${i + 1}`,
     estado: 'planificado',
     objetivo: 100,

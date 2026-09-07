@@ -4,6 +4,7 @@ import {
   CalendarPlus,
   CalendarRange,
   Check,
+  ChevronDown,
   ClipboardList,
   History,
   List,
@@ -27,11 +28,11 @@ import { Alternadores, GrillaFiltros, TarjetaFiltros, limpiarClaves } from '../.
 import { Tabla } from '../../componentes/Tabla.jsx';
 import { Calendario, useMesVisible } from '../../componentes/Calendario.jsx';
 import { Modal } from '../../componentes/Modal.jsx';
-import { CampoFecha, CampoHora, CampoSelect, CampoTexto, GrillaCampos } from '../../componentes/Campo.jsx';
+import { CampoArea, CampoFecha, CampoHora, CampoRadios, CampoSelect, CampoTexto, GrillaCampos } from '../../componentes/Campo.jsx';
 import { SelectorProyecto } from '../../componentes/SelectorProyecto.jsx';
 import { CargarSeguimiento } from './CargarSeguimiento.jsx';
 import { HistorialArea } from './HistorialArea.jsx';
-import { COLUMNAS_COMPROMISO } from './columnasCompromiso.jsx';
+import { COLUMNAS_COMPROMISO, nivelDe } from './columnasCompromiso.jsx';
 import { ESTADOS_COMPROMISO } from '../../datos/catalogos.js';
 import {
   compromisos as selCompromisos,
@@ -68,7 +69,7 @@ export default function Seguimiento() {
 
   const pestanias = [
     { valor: 'calendario', titulo: 'Próximos seguimientos', icono: CalendarRange },
-    { valor: 'cargar', titulo: 'Cargar realizado', icono: NotebookPen },
+    { valor: 'cargar', titulo: 'Cargar nuevo seguimiento', icono: NotebookPen },
     { valor: 'compromisos', titulo: 'Compromisos', icono: ClipboardList },
     { valor: 'historial', titulo: 'Historial por área', icono: History },
   ];
@@ -266,7 +267,11 @@ function PanelCompromisos({ bd, filtros, setFiltros }) {
   const hoy = hoyISO();
   const navegar = useNavigate();
   const opcionesArea = useOpciones('areas');
-  const [cumpliendo, setCumpliendo] = useState(null);
+  // Se abre directo en el compromiso de una alerta (`?compromiso=<id>`) si la
+  // URL lo trae — sólo al entrar: después queda a cargo del clic, como
+  // cualquier otra fila.
+  const [expandidoId, setExpandidoId] = useState(() => filtros.compromiso || null);
+  const [borrador, setBorrador] = useState(null);
 
   /**
    * La lista abre en los compromisos VIGENTES.
@@ -293,8 +298,8 @@ function PanelCompromisos({ bd, filtros, setFiltros }) {
             },
             hoy,
           )
-            .filter((c) => (filtros.solo_vencidos ? c.estado_efectivo === 'vencido' : true))
-            .map((c) => ({ ...c, _resaltar: c.estado_efectivo === 'vencido' }))
+            .filter((c) => (filtros.solo_vencidos ? c.estado_efectivo === 'alerta' : true))
+            .map((c) => ({ ...c, _resaltar: c.estado_efectivo === 'alerta' }))
         : [],
     [bd, filtros, soloVigentes, hoy],
   );
@@ -309,13 +314,30 @@ function PanelCompromisos({ bd, filtros, setFiltros }) {
     return [...set].sort((a, b) => a.localeCompare(b, 'es'));
   }, [bd]);
 
-  const vencidos = filas.filter((f) => f.estado_efectivo === 'vencido').length;
+  const vencidos = filas.filter((f) => f.estado_efectivo === 'alerta').length;
 
   const RUTA_ORIGEN = {
     seguimiento: (f) => `/seguimiento?tab=calendario&seguimiento=${f.id_origen}`,
     monitoreo: (f) => `/monitoreo?tab=ultimos&monitoreo=${f.id_origen}`,
     mesa: (f) => `/mesas?mesa=${f.id_origen}`,
   };
+
+  /** Clic en una fila: la abre si estaba cerrada, la cierra si era la abierta. */
+  function alternarFila(f) {
+    if (expandidoId === f.id) {
+      setExpandidoId(null);
+      setBorrador(null);
+      return;
+    }
+    setExpandidoId(f.id);
+    setBorrador({ estado: f.estado, descripcion: f.descripcion });
+  }
+
+  async function guardarCompromiso(f) {
+    await acciones.actualizarEstadoCompromiso(f.id, borrador);
+    setExpandidoId(null);
+    setBorrador(null);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -369,70 +391,101 @@ function PanelCompromisos({ bd, filtros, setFiltros }) {
         <Tabla
           nombreExport="compromisos"
           filas={filas}
+          columnasCSV={[
+            { clave: 'descripcion', titulo: 'Compromiso' },
+            ...COLUMNAS_COMPROMISO.filter((c) => c.clave === 'responsable' || c.clave === 'area'),
+            { clave: 'id_proyecto', titulo: 'Proyecto' },
+            ...COLUMNAS_COMPROMISO.filter((c) => c.clave === 'fecha_limite' || c.clave === 'estado_efectivo'),
+          ]}
           columnas={[
             {
               clave: 'descripcion',
               titulo: 'Compromiso',
               render: (f) => (
-                <div className="min-w-40">
-                  <p className="leading-tight text-tinta">{f.descripcion}</p>
+                <div className="flex min-w-40 items-center gap-2">
+                  <Semaforo nivel={nivelDe(f)} soloPunto texto={f.estado_efectivo} />
+                  <span className="leading-tight text-tinta">{f.descripcion}</span>
+                  <ChevronDown
+                    size={15}
+                    className={`ml-auto shrink-0 text-tenue transition-transform ${
+                      expandidoId === f.id ? 'rotate-180' : ''
+                    }`}
+                  />
+                </div>
+              ),
+            },
+            ...COLUMNAS_COMPROMISO.filter((c) => c.clave === 'fecha_limite' || c.clave === 'estado_efectivo'),
+          ]}
+          alHacerClicFila={alternarFila}
+          filaExpandida={expandidoId}
+          renderExpandido={(f) => (
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-tenue">Responsable</p>
+                  <p className="text-sm text-tinta">{f.responsable || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-tenue">Área</p>
+                  <p className="text-sm text-tinta">{f.area || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-tenue">Proyecto</p>
+                  {f.id_proyecto ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navegar(`/proyectos/${f.id_proyecto}`);
+                      }}
+                    >
+                      <Chip tono="acento">{f.id_proyecto}</Chip>
+                    </button>
+                  ) : (
+                    <p className="text-sm text-tenue">—</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-tenue">Origen</p>
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       navegar(RUTA_ORIGEN[f.origen_tipo]?.(f) ?? '/seguimiento');
                     }}
-                    className="text-[11px] text-acento underline-offset-2 hover:underline"
+                    className="text-sm text-acento underline-offset-2 hover:underline"
                   >
-                    origen: {f.origen_tipo}
+                    {f.origen_tipo}
                   </button>
                 </div>
-              ),
-            },
-            ...COLUMNAS_COMPROMISO.filter((c) => c.clave === 'responsable' || c.clave === 'area'),
-            {
-              clave: 'id_proyecto',
-              titulo: 'Proyecto',
-              ancho: 120,
-              render: (f) =>
-                f.id_proyecto ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navegar(`/proyectos/${f.id_proyecto}`);
-                    }}
-                  >
-                    <Chip tono="acento">{f.id_proyecto}</Chip>
-                  </button>
-                ) : (
-                  <span className="text-tenue">—</span>
-                ),
-            },
-            ...COLUMNAS_COMPROMISO.filter((c) => c.clave === 'fecha_limite' || c.clave === 'estado_efectivo'),
-            {
-              clave: 'acciones',
-              titulo: '',
-              ancho: 110,
-              sinOrdenar: true,
-              sinExportar: true,
-              render: (f) =>
-                f.estado_efectivo === 'cumplido' ? (
-                  <span className="text-[11px] text-tenue">{fFecha(f.fecha_cumplimiento)}</span>
-                ) : (
-                  <Boton
-                    tamanio="sm"
-                    icono={Check}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCumpliendo(f);
-                    }}
-                  >
-                    Cumplido
-                  </Boton>
-                ),
-            },
-          ]}
+              </div>
+
+              <div className="border-t border-dashed border-borde-fuerte/50 pt-3">
+                <p className="mb-2 text-xs font-semibold text-tinta">Actualizar compromiso</p>
+                <CampoRadios
+                  opciones={ESTADOS_COMPROMISO}
+                  valor={borrador?.estado ?? f.estado}
+                  alCambiar={(v) => setBorrador((b) => ({ ...b, estado: v }))}
+                />
+                <CampoArea
+                  etiqueta="Descripción"
+                  className="mt-2.5"
+                  filas={2}
+                  value={borrador?.descripcion ?? f.descripcion}
+                  onChange={(e) => setBorrador((b) => ({ ...b, descripcion: e.target.value }))}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Boton tamanio="sm" onClick={() => alternarFila(f)}>
+                  Cerrar
+                </Boton>
+                <Boton variante="primario" tamanio="sm" icono={Check} onClick={() => guardarCompromiso(f)}>
+                  Guardar cambios
+                </Boton>
+              </div>
+            </div>
+          )}
           vacio={
             <Vacio
               icono={ClipboardList}
@@ -443,43 +496,7 @@ function PanelCompromisos({ bd, filtros, setFiltros }) {
           }
         />
       </Tarjeta>
-
-      {cumpliendo && <ModalCumplimiento compromiso={cumpliendo} alCerrar={() => setCumpliendo(null)} hoy={hoy} />}
     </div>
-  );
-}
-
-function ModalCumplimiento({ compromiso, alCerrar, hoy }) {
-  const [fechaCumplimiento, setFechaCumplimiento] = useState(hoy);
-  return (
-    <Modal
-      abierto
-      alCerrar={alCerrar}
-      ancho="sm"
-      titulo="Marcar compromiso como cumplido"
-      pie={
-        <>
-          <Boton onClick={alCerrar}>Cancelar</Boton>
-          <Boton
-            variante="primario"
-            icono={Check}
-            onClick={async () => {
-              await acciones.marcarCumplido(compromiso.id, fechaCumplimiento);
-              alCerrar();
-            }}
-          >
-            Confirmar
-          </Boton>
-        </>
-      }
-    >
-      <p className="mb-3 text-sm leading-relaxed text-gris">{compromiso.descripcion}</p>
-      <CampoFecha
-        etiqueta="Fecha de cumplimiento"
-        value={fechaCumplimiento}
-        onChange={(e) => setFechaCumplimiento(e.target.value)}
-      />
-    </Modal>
   );
 }
 

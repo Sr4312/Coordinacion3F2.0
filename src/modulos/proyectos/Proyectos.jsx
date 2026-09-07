@@ -1,14 +1,21 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, FolderKanban, Gem, HardHat, Plus, Upload } from 'lucide-react';
+import { Database, FolderKanban, Gem, HardHat } from 'lucide-react';
 import { EncabezadoPagina, Pagina } from '../../componentes/Layout.jsx';
 import { Tabla } from '../../componentes/Tabla.jsx';
-import { BarraAvance, Boton, Chip, EstadoProyecto, Prioridad, Tarjeta, Vacio } from '../../componentes/Basicos.jsx';
+import {
+  BarraAvance,
+  Boton,
+  Chip,
+  EstadoProyecto,
+  Prioridad,
+  Tarjeta,
+  Vacio,
+  tonoPorIdProyecto,
+} from '../../componentes/Basicos.jsx';
 import { CampoSelect } from '../../componentes/Campo.jsx';
 import { Alternadores, GrillaFiltros, TarjetaFiltros } from '../../componentes/Filtros.jsx';
 import { ModalConfirmacion } from '../../componentes/Modal.jsx';
-import { FormularioProyecto } from './FormularioProyecto.jsx';
-import { ImportarProyectos } from './ImportarProyectos.jsx';
 import { ESTADOS_PROYECTO, PRIORIDADES } from '../../datos/catalogos.js';
 import { COLUMNAS_CSV_PROYECTO } from '../../datos/importacion.js';
 import { proyectos as selProyectos, hoyISO } from '../../datos/selectores.js';
@@ -34,20 +41,28 @@ export default function Proyectos() {
   const bd = useBD();
   const navegar = useNavigate();
   const [filtros, setFiltros, limpiarFiltros] = useFiltrosUrl(DEFAULTS);
-  const [formulario, setFormulario] = useState(null);
-  const [importando, setImportando] = useState(false);
   const [confirmandoDemo, setConfirmandoDemo] = useState(false);
 
   const opcionesArea = useOpciones('areas');
   const opcionesPrograma = useOpciones('programas');
-  const opcionesEje = useOpciones('ejes');
+  // "Compromisos" es un valor de `ejes` que ningún proyecto real usa —los
+  // compromisos cuelgan de seguimiento/monitoreo/mesa, nunca de un eje de
+  // proyecto— así que filtrar por él siempre da la lista vacía. Se saca del
+  // filtro (no del catálogo: sigue en Configuración como vocabulario
+  // institucional, ver catalogos.js).
+  const opcionesEje = useOpciones('ejes').filter((o) => o.id !== 'ej_compromisos');
   const opcionesTipo = useOpciones('tipos');
 
   const filas = useMemo(() => (bd ? selProyectos(bd, filtros) : []), [bd, filtros]);
   const hayProyectos = (bd?.proyectos ?? []).some((p) => p.activo !== false);
 
   const columnas = [
-    { clave: 'id_proyecto', titulo: 'ID', ancho: 130, render: (f) => <Chip tono="acento">{f.id_proyecto}</Chip> },
+    {
+      clave: 'id_proyecto',
+      titulo: 'ID',
+      ancho: 130,
+      render: (f) => <Chip tono={tonoPorIdProyecto(f.id_proyecto)}>{f.id_proyecto}</Chip>,
+    },
     {
       clave: 'proyecto',
       titulo: 'Proyecto',
@@ -109,18 +124,8 @@ export default function Proyectos() {
   return (
     <>
       <EncabezadoPagina
-        titulo="Base maestra de proyectos"
-        descripcion="Se carga una sola vez y alimenta todos los módulos del sistema."
-        acciones={
-          <>
-            <Boton icono={Upload} onClick={() => setImportando(true)}>
-              Importar CSV
-            </Boton>
-            <Boton variante="primario" icono={Plus} onClick={() => setFormulario({})}>
-              Nuevo proyecto
-            </Boton>
-          </>
-        }
+        titulo="Base maestra de proyectos y puntuales"
+        descripcion="Consultá y filtrá lo que ya está cargado. La carga se hace desde Planificación → Proyectos del POA."
       />
 
       <Pagina className="flex flex-col gap-4">
@@ -174,8 +179,12 @@ export default function Proyectos() {
                 <Vacio
                   icono={FolderKanban}
                   titulo="La base maestra está vacía"
-                  descripcion="Cargá el primer proyecto, importá una planilla CSV o usá los datos de demostración para ver el sistema funcionando."
-                  accion={{ texto: 'Cargar primer proyecto', icono: Plus, alHacerClic: () => setFormulario({}) }}
+                  descripcion="La carga de proyectos del POA se hace desde Planificación, o usá los datos de demostración para ver el sistema funcionando."
+                  accion={{
+                    texto: 'Ir a cargar proyectos',
+                    icono: FolderKanban,
+                    alHacerClic: () => navegar('/planificacion?tab=proyectos'),
+                  }}
                 />
               )
             }
@@ -195,9 +204,6 @@ export default function Proyectos() {
           />
         </Tarjeta>
       </Pagina>
-
-      {formulario && <FormularioProyecto abierto alCerrar={() => setFormulario(null)} proyecto={formulario.id_proyecto ? formulario : null} />}
-      {importando && <ImportarProyectos abierto alCerrar={() => setImportando(false)} />}
 
       {/* La carga de la demo BORRA todo lo cargado. Acá se disparaba con un
           solo clic, sin preguntar, al lado de la tabla de trabajo: el mismo

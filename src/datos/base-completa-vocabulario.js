@@ -35,7 +35,7 @@ export const AREAS = [
   {
     nombre: 'Secretaría de Obras Públicas',
     prefijo: 'OBR',
-    eje: 'Desarrollo urbano',
+    eje: 'POA',
     programas: ['Infraestructura urbana', 'Hábitat y vivienda', 'Espacios verdes'],
     porAnio: [14, 16, 12],
     cumplimiento: 0.9,
@@ -55,7 +55,7 @@ export const AREAS = [
   {
     nombre: 'Secretaría de Desarrollo Social',
     prefijo: 'DSO',
-    eje: 'Inclusión y equidad',
+    eje: 'POA',
     programas: ['Inclusión social', 'Primera infancia', 'Hábitat y vivienda'],
     porAnio: [10, 11, 9],
     cumplimiento: 0.995,
@@ -73,7 +73,7 @@ export const AREAS = [
   {
     nombre: 'Secretaría de Servicios Públicos',
     prefijo: 'SPU',
-    eje: 'Ambiente y sustentabilidad',
+    eje: 'POA',
     programas: ['Higiene urbana', 'Espacios verdes'],
     porAnio: [9, 10, 8],
     cumplimiento: 0.86,
@@ -90,7 +90,7 @@ export const AREAS = [
   {
     nombre: 'Secretaría de Salud',
     prefijo: 'SAL',
-    eje: 'Salud y bienestar',
+    eje: 'POA',
     programas: ['Atención primaria de la salud', 'Salud comunitaria'],
     porAnio: [8, 9, 7],
     cumplimiento: 0.998,
@@ -107,7 +107,7 @@ export const AREAS = [
   {
     nombre: 'Subsecretaría de Educación',
     prefijo: 'EDU',
-    eje: 'Educación y cultura',
+    eje: 'POA',
     programas: ['Trayectorias educativas', 'Primera infancia'],
     porAnio: [7, 7, 6],
     cumplimiento: 0.999,
@@ -123,7 +123,7 @@ export const AREAS = [
   {
     nombre: 'Subsecretaría de Cultura',
     prefijo: 'CUL',
-    eje: 'Educación y cultura',
+    eje: 'POA',
     programas: ['Cultura de cercanía'],
     porAnio: [6, 6, 5],
     cumplimiento: 0.997,
@@ -139,7 +139,7 @@ export const AREAS = [
   {
     nombre: 'Dirección de Producción y Empleo',
     prefijo: 'PRO',
-    eje: 'Desarrollo económico',
+    eje: 'POA',
     programas: ['Empleo joven', 'Economía social'],
     porAnio: [6, 6, 5],
     cumplimiento: 0.99,
@@ -155,7 +155,7 @@ export const AREAS = [
   {
     nombre: 'Dirección de Ambiente',
     prefijo: 'AMB',
-    eje: 'Ambiente y sustentabilidad',
+    eje: 'POA',
     programas: ['Espacios verdes', 'Higiene urbana'],
     porAnio: [6, 7, 5],
     cumplimiento: 0.995,
@@ -171,7 +171,7 @@ export const AREAS = [
   {
     nombre: 'Secretaría de Gobierno',
     prefijo: 'GOB',
-    eje: 'Modernización de la gestión',
+    eje: 'POA',
     programas: ['Cercanía y atención al vecino', 'Modernización administrativa'],
     porAnio: [5, 5, 4],
     cumplimiento: 0.88,
@@ -186,7 +186,7 @@ export const AREAS = [
   {
     nombre: 'Secretaría de Hacienda',
     prefijo: 'HAC',
-    eje: 'Modernización de la gestión',
+    eje: 'POA',
     programas: ['Modernización administrativa'],
     porAnio: [4, 5, 4],
     cumplimiento: 1,
@@ -201,7 +201,7 @@ export const AREAS = [
   {
     nombre: 'Dirección de Deportes',
     prefijo: 'DEP',
-    eje: 'Salud y bienestar',
+    eje: 'POA',
     programas: ['Deporte comunitario', 'Espacios verdes'],
     porAnio: [5, 5, 4],
     cumplimiento: 0.997,
@@ -216,7 +216,7 @@ export const AREAS = [
   {
     nombre: 'Dirección de Juventud',
     prefijo: 'JUV',
-    eje: 'Inclusión y equidad',
+    eje: 'POA',
     programas: ['Empleo joven', 'Inclusión social'],
     porAnio: [4, 4, 3],
     cumplimiento: 1,
@@ -230,7 +230,7 @@ export const AREAS = [
   {
     nombre: 'Dirección de Género y Diversidad',
     prefijo: 'GEN',
-    eje: 'Inclusión y equidad',
+    eje: 'POA',
     programas: ['Inclusión social'],
     porAnio: [3, 4, 3],
     cumplimiento: 0.999,
@@ -244,7 +244,7 @@ export const AREAS = [
   {
     nombre: 'Dirección de Modernización',
     prefijo: 'MOD',
-    eje: 'Modernización de la gestión',
+    eje: 'POA',
     programas: ['Modernización administrativa'],
     porAnio: [4, 4, 4],
     cumplimiento: 1,
@@ -265,11 +265,11 @@ export const PROGRAMAS = [
   'Seguridad vial', 'Turismo local', 'Cooperación institucional',
 ];
 
-export const EJES = [
-  'Desarrollo urbano', 'Inclusión y equidad', 'Salud y bienestar', 'Educación y cultura',
-  'Desarrollo económico', 'Ambiente y sustentabilidad', 'Modernización de la gestión',
-  'Participación ciudadana',
-];
+// Mismos valores reales que `CATALOGOS_SEMILLA.ejes` (ver catalogos.js) — antes
+// tenía ocho ejes genéricos inventados que no existen en ningún sheet. Los
+// proyectos de `AREAS` de acá arriba usan todos 'POA'; el resto queda listado
+// para que el catálogo de "base completa" no sea más pobre que el real.
+export const EJES = ['POA', 'Puntual', 'Mesa Esperanza', 'Mesa EDLA', 'Mesa Favelita / El Libertador', 'Posicionamiento', 'Compromisos'];
 
 export const TIPOS_PROYECTO = [
   ['Obra', true], ['Servicio', false], ['Programa social', false],
@@ -297,19 +297,19 @@ export const TIPOS_EVENTO = [
 export const PERIODICIDADES = ['semanal', 'quincenal', 'mensual', 'bimestral', 'trimestral'];
 
 /**
- * Catálogos del posicionamiento internacional y de la cartera estratégica.
+ * Catálogos del posicionamiento y de la cartera estratégica.
  *
- * Los tipos coinciden con las claves de `ACCIONES_INTERNACIONALES` en
- * `sintetico.js`: es lo que hace que el generador pueda armar nombres de acción
- * coherentes con su tipo. Los organismos son reales porque son con quienes un
- * municipio se relaciona de verdad; las acciones concretas, no.
+ * Los tipos coinciden con las claves de `PLANTILLAS_POSICIONAMIENTO` en
+ * `sintetico.js`: es lo que hace que el generador pueda armar nombres de
+ * proyecto coherentes con su tipo. Los organismos son reales porque son con
+ * quienes un municipio se relaciona de verdad; los proyectos concretos, no.
  */
-export const TIPOS_ACCION_INTERNACIONAL = [
+export const TIPOS_PROYECTO_POSICIONAMIENTO = [
   'Hermanamiento', 'Red de ciudades', 'Postulación a fondo', 'Premio o distinción',
   'Misión o visita', 'Convenio de cooperación', 'Evento internacional', 'Membresía en organismo',
 ];
 
-export const ORGANISMOS_INTERNACIONALES = [
+export const ORGANISMOS = [
   'Mercociudades',
   'CGLU — Ciudades y Gobiernos Locales Unidos',
   'UCCI — Unión de Ciudades Capitales Iberoamericanas',
@@ -324,12 +324,6 @@ export const ORGANISMOS_INTERNACIONALES = [
   'C40 Cities',
   'Embajada o consulado',
   'Universidad extranjera',
-];
-
-export const PAISES_CONTRAPARTE = [
-  'Brasil', 'Uruguay', 'Chile', 'Paraguay', 'Bolivia', 'Perú', 'Colombia', 'México',
-  'España', 'Italia', 'Francia', 'Alemania', 'Portugal', 'Estados Unidos', 'Canadá',
-  'Japón', 'Corea del Sur', 'China', 'Israel', 'Multilateral / varios países',
 ];
 
 export const MOTIVOS_ESTRATEGICOS = [
@@ -363,9 +357,8 @@ export function armarCatalogos() {
     items_requerimiento: ITEMS_REQUERIMIENTO.map((i) => item('rq', i)),
     tipos_evento: TIPOS_EVENTO.map((t) => item('te', t)),
     periodicidades: PERIODICIDADES.map((p) => item('pe', p)),
-    tipos_accion_internacional: TIPOS_ACCION_INTERNACIONAL.map((t) => item('ai', t)),
-    organismos_internacionales: ORGANISMOS_INTERNACIONALES.map((o) => item('or', o)),
-    paises_contraparte: PAISES_CONTRAPARTE.map((p) => item('pa', p)),
+    tipos_proyecto_posicionamiento: TIPOS_PROYECTO_POSICIONAMIENTO.map((t) => item('ai', t)),
+    organismos: ORGANISMOS.map((o) => item('or', o)),
     motivos_estrategicos: MOTIVOS_ESTRATEGICOS.map((m) => item('me', m)),
   };
 }

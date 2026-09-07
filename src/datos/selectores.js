@@ -8,8 +8,8 @@
 import {
   DIAS_PERIODICIDAD,
   ESTADOS_ACTIVOS,
-  ESTADOS_INTERNACIONAL_ABIERTOS,
-  ESTADOS_INTERNACIONAL_CON_PLAZO,
+  ESTADOS_POSICIONAMIENTO_ABIERTOS,
+  ESTADOS_POSICIONAMIENTO_CON_PLAZO,
   UMBRALES,
 } from './catalogos.js';
 import { masRecientePrimero, redactarAsiento } from './bitacora.js';
@@ -306,10 +306,29 @@ export function zonasDeObras(bd) {
  * `vencido` es DERIVADO, no persistido: sin backend no hay proceso que lo marque
  * al cambiar el día, así que guardarlo garantizaría datos desactualizados.
  */
+/**
+ * Estado EFECTIVO de un compromiso, que no es el que está guardado.
+ *
+ * El ciclo de vida real (confirmado por JP el 01/09/2026, ver
+ * `contexto/glosario.md` del repo de trabajo): un compromiso nace `pendiente`
+ * en un seguimiento, con una fecha límite que es la del próximo seguimiento o
+ * una elegida a mano. De ahí pasa a `en_curso` o directamente a `cumplido`. Si
+ * llega la fecha límite y sigue abierto, queda en **`alerta`**.
+ *
+ * `alerta` no se guarda: se deduce comparando contra la fecha de hoy. Nadie lo
+ * carga, y ningún proceso lo marca al cambiar el día — persistirlo garantizaría
+ * datos desactualizados.
+ *
+ * **Sin `fecha_limite` no hay alerta posible.** Un compromiso sin esa fecha se
+ * queda en `pendiente` para siempre, por más meses que lleve abierto. Por eso la
+ * fecha es obligatoria al crear (ver `crearCompromiso()` en repositorio.js); los
+ * 124 compromisos históricos que se cargan del `_db` no la tienen, y por
+ * decisión de JP quedan sin alerta en vez de inventarles una.
+ */
 export function estadoCompromiso(c, hoy) {
   if (c.estado === 'cumplido') return 'cumplido';
   const dias = diasHasta(c.fecha_limite, hoy);
-  if (dias !== null && dias < 0) return 'vencido';
+  if (dias !== null && dias < 0) return 'alerta';
   return c.estado;
 }
 
@@ -322,7 +341,7 @@ export function compromisos(bd, filtros = {}, hoy = hoyISO()) {
         ...c,
         estado_efectivo,
         dias_restantes: dias,
-        dias_atraso: estado_efectivo === 'vencido' ? Math.abs(dias) : 0,
+        dias_atraso: estado_efectivo === 'alerta' ? Math.abs(dias) : 0,
       };
     })
     .filter((c) =>
@@ -461,6 +480,13 @@ export function nombresAreas(bd) {
     .sort((a, b) => a.localeCompare(b, 'es'));
 }
 
+/** Áreas que `usuario` eligió monitorear, en Configuración → «Mis áreas». */
+export function areasAsignadas(bd, usuario) {
+  return (bd.asignaciones_monitoreo ?? [])
+    .filter((a) => a.usuario === usuario)
+    .map((a) => a.area);
+}
+
 /** Orden de presentación: primero las secretarías que necesitan intervención. */
 const ORDEN_NIVEL = { vencido: 0, proximo: 1, atencion: 2, sindato: 3, enregla: 4 };
 
@@ -563,7 +589,7 @@ export function resumenSecretaria(bd, area, filtros = {}, hoy = hoyISO()) {
     },
     compromisos: {
       total: listaCompromisos.length,
-      vencidos: listaCompromisos.filter((c) => c.estado_efectivo === 'vencido').length,
+      vencidos: listaCompromisos.filter((c) => c.estado_efectivo === 'alerta').length,
       cumplidos: listaCompromisos.filter((c) => c.estado_efectivo === 'cumplido').length,
       por_vencer: listaCompromisos.filter(
         (c) =>
@@ -597,11 +623,42 @@ export function resumenSecretaria(bd, area, filtros = {}, hoy = hoyISO()) {
 
 /** Próximo seguimiento agendado del área; null si no hay ninguno por delante. */
 function proximoSeguimiento(bd, area, hoy) {
-  return (
+  return ventanaSeguimiento(bd, area, hoy).proximo;
+}
+
+/**
+ * Ventana de seguimiento de un área: el último REALIZADO (pasado) y el
+ * próximo PROGRAMADO (futuro). Cada secretaría agenda sus seguimientos por
+ * su cuenta, así que esta ventana varía de área en área — nunca es una fecha
+ * fija del sistema. La usa Monitoreo para mostrar, durante la carga
+ * semanal, los proyectos y compromisos que corresponden al período que este
+ * monitoreo cubre.
+ */
+export function ventanaSeguimiento(bd, area, hoy = hoyISO()) {
+  // `seguimientos()` ya devuelve ordenado desc por fecha: el primero
+  // "realizado" es el más reciente sin más vuelta.
+  const ultimo = seguimientos(bd, { area, tipo: 'realizado' })[0] ?? null;
+  const proximo =
     seguimientos(bd, { area, tipo: 'programado' })
       .filter((s) => String(s.fecha).slice(0, 10) >= hoy)
-      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[0] ?? null
-  );
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[0] ?? null;
+  return { ultimo, proximo };
+}
+
+/**
+ * Compromisos vigentes de un proyecto cuya fecha límite cae dentro de la
+ * ventana de seguimiento del área. Sin límite de un lado si ese seguimiento
+ * todavía no existe (nunca se hizo uno antes, o no hay ninguno agendado
+ * después) — y sin excluir los que no tienen fecha límite cargada: no hay
+ * ventana que los pueda dejar afuera.
+ */
+export function compromisosEnVentana(bd, idProyecto, ventana, hoy = hoyISO()) {
+  return compromisos(bd, { id_proyecto: idProyecto, solo_vigentes: true }, hoy).filter((c) => {
+    if (!c.fecha_limite) return true;
+    if (ventana.ultimo && c.fecha_limite < ventana.ultimo.fecha) return false;
+    if (ventana.proximo && c.fecha_limite > ventana.proximo.fecha) return false;
+    return true;
+  });
 }
 
 /**
@@ -814,7 +871,7 @@ export function historialUnificado(bd, idProyecto, capas = {}, hoy = hoyISO()) {
         titulo: c.descripcion,
         detalle: `origen: ${c.origen_tipo}`,
         extra: [c.area, c.responsable].filter(Boolean).join(' · '),
-        estado: c.estado_efectivo === 'vencido' ? `vencido · ${c.dias_atraso} d` : c.estado_efectivo,
+        estado: c.estado_efectivo === 'alerta' ? `alerta · ${c.dias_atraso} d` : c.estado_efectivo,
         nivel: c.estado_efectivo === 'cumplido' ? 'enregla' : nivelPorDias(c.dias_restantes),
         ruta: `/seguimiento?tab=compromisos&compromiso=${c.id}`,
       });
@@ -1078,7 +1135,7 @@ export function proyectosEstrategicos(bd, filtros = {}, hoy = hoyISO()) {
           : null,
         dias_al_fin: diasHasta(p.fecha_fin_prevista, hoy),
         compromisos_abiertos: compromisos.filter((c) => estadoCompromiso(c, hoy) !== 'cumplido').length,
-        compromisos_vencidos: compromisos.filter((c) => estadoCompromiso(c, hoy) === 'vencido').length,
+        compromisos_vencidos: compromisos.filter((c) => estadoCompromiso(c, hoy) === 'alerta').length,
         temas_criticos: (temasPorProyecto.get(p.id_proyecto) ?? []).filter(
           (t) => t.criticidad === 'alta' && !t.resuelto,
         ).length,
@@ -1188,7 +1245,11 @@ export function candidatosEstrategicos(bd, filtros = {}, hoy = hoyISO()) {
         id_proyecto: id,
         area: s.area ?? '',
         fecha: s.fecha ?? null,
-        titulo: s.problemas[0],
+        // Un problema es hoy { descripcion, id_proyecto } (24/08/2026);
+        // defensivo contra el string simple de antes, que puede seguir
+        // guardado en el navegador de quien cargó un seguimiento con la
+        // versión vieja del formulario.
+        titulo: typeof s.problemas[0] === 'string' ? s.problemas[0] : s.problemas[0]?.descripcion ?? '',
         detalle: `${s.problemas.length} problema(s) informados en el seguimiento`,
         ruta: `/seguimiento?vista=lista&seguimiento=${s.id}`,
       });
@@ -1238,17 +1299,17 @@ export function candidatosEstrategicos(bd, filtros = {}, hoy = hoyISO()) {
   );
 }
 
-/* ── Posicionamiento internacional ──────────────────────────────────── */
+/* ── Posicionamiento ───────────────────────────────────────────────── */
 
 /**
- * Semáforo de una acción internacional.
+ * Semáforo de un proyecto de posicionamiento.
  *
  * Sólo lo que todavía no se presentó tiene reloj: ahí el plazo es todo, porque
  * una convocatoria que cierra no se reabre. Una vez presentada, la fecha ya no
  * dice nada del riesgo y el semáforo pasa a leer el estado.
  */
-export function nivelAccionInternacional(a) {
-  if (ESTADOS_INTERNACIONAL_CON_PLAZO.includes(a.estado) && a.fecha_limite) {
+export function nivelProyectoPosicionamiento(a) {
+  if (ESTADOS_POSICIONAMIENTO_CON_PLAZO.includes(a.estado) && a.fecha_limite) {
     return nivelPorDias(a.dias_al_cierre);
   }
   if (a.estado === 'vigente') return 'enregla';
@@ -1256,18 +1317,18 @@ export function nivelAccionInternacional(a) {
   return 'sindato';
 }
 
-export function accionesInternacionales(bd, filtros = {}, hoy = hoyISO()) {
+export function proyectosPosicionamiento(bd, filtros = {}, hoy = hoyISO()) {
   const { texto, ods, ...resto } = filtros;
-  return activos(bd.acciones_internacionales)
+  return activos(bd.proyectos_posicionamiento)
     .map((a) => {
       const derivada = {
         ...a,
         ods: a.ods ?? [],
         ids_proyecto: a.ids_proyecto ?? [],
-        abierta: ESTADOS_INTERNACIONAL_ABIERTOS.includes(a.estado),
+        abierta: ESTADOS_POSICIONAMIENTO_ABIERTOS.includes(a.estado),
         dias_al_cierre: diasHasta(a.fecha_limite, hoy),
       };
-      return { ...derivada, nivel: nivelAccionInternacional(derivada) };
+      return { ...derivada, nivel: nivelProyectoPosicionamiento(derivada) };
     })
     .filter((a) =>
       coincide(resto.tipo, a.tipo) &&
@@ -1295,7 +1356,7 @@ export function accionesInternacionales(bd, filtros = {}, hoy = hoyISO()) {
 /** Cantidad de acciones por dimensión. `ods` es multivaluado y se cuenta una vez por objetivo. */
 export function accionesPorDimension(bd, campo, filtros = {}, hoy = hoyISO()) {
   const cuenta = new Map();
-  for (const a of accionesInternacionales(bd, filtros, hoy)) {
+  for (const a of proyectosPosicionamiento(bd, filtros, hoy)) {
     const valores = campo === 'ods' ? a.ods.map((n) => `ODS ${n}`) : [a[campo] || 'Sin definir'];
     for (const v of valores.length ? valores : ['Sin definir']) {
       cuenta.set(v, (cuenta.get(v) ?? 0) + 1);
@@ -1315,7 +1376,7 @@ export function accionesPorDimension(bd, campo, filtros = {}, hoy = hoyISO()) {
  * revés de lo que hay que incentivar.
  */
 export function resumenPosicionamiento(bd, filtros = {}, hoy = hoyISO()) {
-  const lista = accionesInternacionales(bd, filtros, hoy);
+  const lista = proyectosPosicionamiento(bd, filtros, hoy);
   const porEstado = {};
   let financiamientoObtenido = 0;
   let financiamientoEnGestion = 0;
@@ -1345,7 +1406,7 @@ export function resumenPosicionamiento(bd, filtros = {}, hoy = hoyISO()) {
     proyectos_vinculados: new Set(lista.flatMap((a) => a.ids_proyecto)).size,
     por_estado: porEstado,
     proximos_cierres: lista
-      .filter((a) => a.dias_al_cierre !== null && ESTADOS_INTERNACIONAL_CON_PLAZO.includes(a.estado))
+      .filter((a) => a.dias_al_cierre !== null && ESTADOS_POSICIONAMIENTO_CON_PLAZO.includes(a.estado))
       .sort((a, b) => a.dias_al_cierre - b.dias_al_cierre),
   };
 }

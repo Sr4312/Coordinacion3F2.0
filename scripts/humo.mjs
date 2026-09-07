@@ -28,6 +28,8 @@ const SALIDA = 'node_modules/.humo';
 const CON_DEMO = [
   ['/', 'Próximos vencimientos importantes'],
   ['/', 'Proyectos activos'],
+  ['/mis-areas', 'Tus áreas'],
+  ['/mis-areas', 'Todavía no elegiste ninguna área'],
   ['/proyectos', 'Base maestra de proyectos'],
   ['/proyectos?solo_activos=1&es_obra=1', 'Sólo obras'],
   ['/obras', 'Dónde están las obras'],
@@ -45,10 +47,10 @@ const CON_DEMO = [
   ['/monitoreo', 'Panel de alertas'],
   ['/monitoreo', 'Secretarías en la hoja'],
   ['/monitoreo', 'Criticidad de los temas'],
-  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras%20P%C3%BAblicas', 'Temas del período'],
-  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras%20P%C3%BAblicas', 'Compromisos vigentes'],
-  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras%20P%C3%BAblicas', 'Ejecución presupuestaria'],
-  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras%20P%C3%BAblicas', 'Proyectos de la secretaría'],
+  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras', 'Temas del período'],
+  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras', 'Compromisos vigentes'],
+  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras', 'Ejecución presupuestaria'],
+  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras', 'Proyectos de la secretaría'],
   ['/monitoreo?tab=ultimos', 'Criticidad máxima'],
   ['/monitoreo?tab=cobertura', 'Secretarías sin cobertura'],
   ['/monitoreo?tab=cargar', 'Iniciar monitoreo'],
@@ -58,7 +60,7 @@ const CON_DEMO = [
   ['/estrategicos?tab=cartera', 'Sin novedades'],
   ['/estrategicos?tab=promover', 'De dónde sale esta lista'],
   ['/posicionamiento', 'Qué cierra primero'],
-  ['/posicionamiento', 'Proyectos de Posicionamiento en curso'],
+  ['/posicionamiento', 'Proyectos de posicionamiento en curso'],
   ['/posicionamiento?tab=acciones', 'Financiamiento'],
   ['/posicionamiento?tab=alianzas', 'Cobertura de la Agenda 2030'],
   ['/posicionamiento?tab=alianzas', 'Ciudades y comunidades sostenibles'],
@@ -74,7 +76,7 @@ const CON_DEMO = [
   ['/eventos?tab=checklist', 'Requerimientos sin confirmar'],
   ['/reportes', 'Municipio de Tres de Febrero'],
   ['/reportes', 'Filtros aplicados'],
-  ['/configuracion', 'Usuario actual'],
+  ['/configuracion', 'Tu usuario'],
   ['/configuracion', 'Cargar datos de demostración'],
 ];
 
@@ -87,6 +89,7 @@ const CON_DEMO = [
 const CON_BASE_COMPLETA = [
   ['/', 'Próximos vencimientos importantes'],
   ['/', 'Proyectos activos'],
+  ['/mis-areas', 'Tus áreas'],
   ['/proyectos', 'Base maestra de proyectos'],
   ['/proyectos?solo_activos=1&es_obra=1', 'Sólo obras'],
   ['/obras', 'Dónde están las obras'],
@@ -95,7 +98,7 @@ const CON_BASE_COMPLETA = [
   ['/seguimiento?tab=compromisos', 'Compromiso'],
   ['/seguimiento?vista=lista', 'Temas a tratar'],
   ['/monitoreo', 'Secretarías en la hoja'],
-  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras%20P%C3%BAblicas', 'Proyectos de la secretaría'],
+  ['/monitoreo?secretaria=Secretar%C3%ADa%20de%20Obras', 'Proyectos de la secretaría'],
   ['/monitoreo?tab=cobertura', 'Secretarías sin cobertura'],
   ['/monitoreo?tab=alertas', 'Compromisos vencidos'],
   ['/estrategicos', 'Lo que hay que mirar esta semana'],
@@ -103,7 +106,7 @@ const CON_BASE_COMPLETA = [
   ['/estrategicos?tab=cartera', 'Sin novedades'],
   ['/estrategicos?tab=promover', 'De dónde sale esta lista'],
   ['/posicionamiento', 'Qué cierra primero'],
-  ['/posicionamiento', 'Proyectos de Posicionamiento en curso'],
+  ['/posicionamiento', 'Proyectos de posicionamiento en curso'],
   ['/posicionamiento?tab=acciones', 'Financiamiento'],
   ['/posicionamiento?tab=alianzas', 'Cobertura de la Agenda 2030'],
   ['/posicionamiento?tab=alianzas', 'Ciudades y comunidades sostenibles'],
@@ -118,6 +121,7 @@ const CON_BASE_COMPLETA = [
 /** Con el sistema vacío: se espera el estado vacío, no un error ni una pantalla en blanco. */
 const CON_SISTEMA_VACIO = [
   ['/', 'El sistema está vacío'],
+  ['/mis-areas', 'Todavía no elegiste ninguna área'],
   ['/proyectos', 'La base maestra está vacía'],
   ['/obras', 'No hay ninguna obra cargada'],
   ['/seguimiento', 'Sin seguimientos agendados'],
@@ -134,7 +138,7 @@ const CON_SISTEMA_VACIO = [
   ['/monitoreo?tab=alertas', 'Sin alertas activas'],
   ['/estrategicos?tab=cartera', 'Sin proyectos estratégicos'],
   ['/estrategicos?tab=promover', 'Sin candidatos'],
-  ['/posicionamiento?tab=acciones', 'Sin acciones internacionales'],
+  ['/posicionamiento?tab=acciones', 'Sin proyectos de posicionamiento'],
   ['/posicionamiento?tab=alianzas', 'ODS cubiertos'],
   ['/planificacion', 'Sin proyectos para analizar'],
   ['/planificacion?tab=comparativo', 'Sin proyectos planificados'],
@@ -145,7 +149,7 @@ const CON_SISTEMA_VACIO = [
   ['/eventos?tab=lista', 'Sin eventos cargados'],
   ['/eventos?tab=checklist', 'Sin eventos pendientes'],
   ['/reportes', 'Sin filtros aplicados'],
-  ['/configuracion', 'Usuario actual'],
+  ['/configuracion', 'Tu usuario'],
 ];
 
 /** `{id}` se reemplaza por un id real de la demo; `{proyecto}`, por su nombre. */
@@ -166,9 +170,13 @@ const COMPONENTES = [
   ['HistorialProyecto', 'Hitos planificados'],
   // El formulario de tema con un borrador transferido adentro: el compromiso
   // detectado tiene que llegar con la acción marcada y sus campos abiertos.
-  ['FormularioTema', 'Requiere acción'],
+  ['FormularioTema', 'Crear nuevo compromiso'],
   ['FormularioTema', 'Responsable'],
   ['FormularioTema', 'Administrativo / expediente'],
+  // Parte 2 de Monitoreo: proyectos y compromisos de la ventana entre
+  // seguimientos, con el área real de un proyecto de la demo.
+  ['PanelVentana', 'Proyectos y compromisos de esta ventana'],
+  ['PanelVentana', 'Ventana de este monitoreo'],
 ];
 
 try {

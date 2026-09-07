@@ -35,7 +35,7 @@
 import { bdVacia } from './esquema.js';
 import { nuevoId } from './ids.js';
 import {
-  ACCIONES_INTERNACIONALES,
+  PLANTILLAS_POSICIONAMIENTO,
   BARRIOS,
   CIUDADES_EXTRANJERAS,
   COMPROMISOS_PUBLICOS,
@@ -336,8 +336,8 @@ export function generarBaseCompleta(hoy) {
     const dias = Math.round((Date.parse(fechaLimite) - Date.parse(hoy)) / MS_DIA);
     if (dias < -120) return chance(Math.min(base + 0.04, 1)) ? 'cumplido' : 'pendiente';
     if (dias < -30) return chance(base) ? 'cumplido' : 'pendiente';
-    if (dias < 0) return chance(base - 0.12) ? 'cumplido' : chance(0.5) ? 'pendiente' : 'en curso';
-    return chance(0.3) ? 'cumplido' : chance(0.45) ? 'en curso' : 'pendiente';
+    if (dias < 0) return chance(base - 0.12) ? 'cumplido' : chance(0.5) ? 'pendiente' : 'en_curso';
+    return chance(0.3) ? 'cumplido' : chance(0.45) ? 'en_curso' : 'pendiente';
   };
 
   /* ── Seguimientos ───────────────────────────────────────────────── */
@@ -363,6 +363,14 @@ export function generarBaseCompleta(hoy) {
       const problemas = tomar(FRASES_PROBLEMA, entre(0, 2));
       const pedidos = tomar(FRASES_COMPROMISO, entre(1, 3));
       const firma = elegir(EQUIPO);
+      // { descripcion, id_proyecto } desde el 24/08/2026: cada avance o
+      // problema puede vincularse a uno de los proyectos que tocó el
+      // seguimiento, no solo el seguimiento en su conjunto.
+      const conProyecto = (frases) =>
+        frases.map((descripcion, i) => ({
+          descripcion,
+          id_proyecto: vinculados.length ? vinculados[i % vinculados.length] : null,
+        }));
 
       const s = {
         id: nuevoId('seg'),
@@ -382,8 +390,8 @@ export function generarBaseCompleta(hoy) {
         resumen: problemas.length
           ? 'Revisión de avance con puntos pendientes de resolución.'
           : 'Revisión de avance y definición de próximos pasos.',
-        avances,
-        problemas,
+        avances: conProyecto(avances),
+        problemas: conProyecto(problemas),
         estado_reportado: problemas.length > 1 ? 'demorado' : 'en ejecución',
         activo: true,
         creado_por: firma,
@@ -815,7 +823,7 @@ export function generarBaseCompleta(hoy) {
       area: p.area,
       id_proyecto: p.id_proyecto,
       fecha_limite: desplazar(hoy, -entre(2, 45)),
-      estado: chance(0.5) ? 'pendiente' : 'en curso',
+      estado: chance(0.5) ? 'pendiente' : 'en_curso',
     });
   }
   for (let i = 0; i < 10; i += 1) {
@@ -826,7 +834,7 @@ export function generarBaseCompleta(hoy) {
       area: p.area,
       id_proyecto: p.id_proyecto,
       fecha_limite: desplazar(hoy, entre(0, 6)),
-      estado: chance(0.5) ? 'pendiente' : 'en curso',
+      estado: chance(0.5) ? 'pendiente' : 'en_curso',
     });
   }
 
@@ -883,13 +891,12 @@ export function generarBaseCompleta(hoy) {
     );
   }
 
-  /* ── Posicionamiento internacional ──────────────────────────────── */
+  /* ── Posicionamiento ────────────────────────────────────────────── */
 
-  const TIPOS_ACCION = Object.keys(ACCIONES_INTERNACIONALES);
+  const TIPOS_ACCION = Object.keys(PLANTILLAS_POSICIONAMIENTO);
   const nombresActivos = (catalogo) =>
     bd.catalogos[catalogo].filter((i) => i.activo !== false).map((i) => i.nombre);
-  const organismos = nombresActivos('organismos_internacionales');
-  const paises = nombresActivos('paises_contraparte');
+  const organismos = nombresActivos('organismos');
 
   /** ODS a los que contribuye la acción. El 11 aparece seguido: es el de ciudades. */
   const objetivosDe = () => {
@@ -899,7 +906,7 @@ export function generarBaseCompleta(hoy) {
   };
 
   const crearAccion = ({ tipo, estado, fechaInicio, fechaLimite, idsProyecto }) => {
-    const plantilla = elegir(ACCIONES_INTERNACIONALES[tipo]);
+    const plantilla = elegir(PLANTILLAS_POSICIONAMIENTO[tipo]);
     const nombre = plantilla.replace('{ciudad}', elegir(CIUDADES_EXTRANJERAS));
     const firma = elegir(EQUIPO);
     const conPlata = tipo === 'Postulación a fondo' || (tipo === 'Convenio de cooperación' && chance(0.4));
@@ -910,8 +917,6 @@ export function generarBaseCompleta(hoy) {
       nombre,
       tipo,
       organismo: elegir(organismos),
-      pais: elegir(paises),
-      alcance: chance(0.4) ? 'bilateral' : chance(0.6) ? 'regional' : 'multilateral',
       estado,
       area: elegir(AREAS).nombre,
       referente: elegir(PERSONAS),
@@ -932,9 +937,9 @@ export function generarBaseCompleta(hoy) {
       creado_por: firma,
       creado_en: marcaTiempo(fechaInicio, 10, entre(0, 59)),
     };
-    bd.acciones_internacionales.push(accion);
+    bd.proyectos_posicionamiento.push(accion);
     asentar(
-      'acciones_internacionales',
+      'proyectos_posicionamiento',
       accion.id,
       'alta',
       [],

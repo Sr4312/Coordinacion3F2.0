@@ -1,26 +1,31 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import logo3f from '../assets/logo-3f.png';
+import { usePerfil, useSesion } from '../estado/sesion.js';
 import {
-  Building2,
   CalendarCheck,
   CalendarDays,
+  CloudCog,
   FileBarChart,
   FolderKanban,
   Gem,
   Globe2,
   HardHat,
   LayoutDashboard,
+  LogOut,
   Menu,
   Radar,
   Settings,
   Target,
+  UserCheck,
   Users,
   X,
 } from 'lucide-react';
 
 const MODULOS = [
   { ruta: '/', titulo: 'Inicio', icono: LayoutDashboard, exacta: true },
-  { ruta: '/proyectos', titulo: 'Proyectos', icono: FolderKanban },
+  { ruta: '/mis-areas', titulo: 'Mis áreas', icono: UserCheck },
+  { ruta: '/proyectos', titulo: 'Proyectos y Puntuales', icono: FolderKanban },
   { ruta: '/obras', titulo: 'Obras', icono: HardHat },
   { ruta: '/seguimiento', titulo: 'Seguimiento', icono: CalendarCheck },
   { ruta: '/monitoreo', titulo: 'Monitoreo', icono: Radar },
@@ -30,6 +35,7 @@ const MODULOS = [
   { ruta: '/mesas', titulo: 'Mesas de trabajo', icono: Users },
   { ruta: '/eventos', titulo: 'Eventos', icono: CalendarDays },
   { ruta: '/reportes', titulo: 'Reportes', icono: FileBarChart },
+  { ruta: '/vigentes-supabase', titulo: 'Vigentes (Supabase)', icono: CloudCog },
 ];
 
 function Navegacion({ alNavegar }) {
@@ -53,17 +59,52 @@ function Navegacion({ alNavegar }) {
           <Settings size={17} className="shrink-0" />
           Configuración
         </NavLink>
+        <UsuarioSesion />
       </div>
     </nav>
+  );
+}
+
+/**
+ * Nombre del rol tal como se dice en el municipio. El valor guardado en la
+ * base es el técnico (`jefe_gabinete`); mostrarlo crudo en pantalla sería
+ * filtrar vocabulario de la implementación a una interfaz institucional.
+ */
+const ROTULO_ROL = {
+  admin: 'Control de Gestión',
+  coordinacion: 'Control de Gestión',
+  jefe_gabinete: 'Jefatura de Gabinete',
+  intendencia: 'Intendencia',
+  area: 'Secretaría',
+};
+
+function UsuarioSesion() {
+  const perfil = usePerfil();
+  const salir = useSesion((e) => e.salir);
+  if (!perfil) return null;
+
+  return (
+    <div className="mt-2 border-t border-borde px-3 pt-3">
+      <p className="truncate text-sm font-medium leading-tight text-tinta">{perfil.nombre}</p>
+      <p className="truncate text-[11px] leading-tight text-tenue">
+        {ROTULO_ROL[perfil.rol] ?? perfil.rol}
+      </p>
+      <button
+        type="button"
+        onClick={salir}
+        className="mt-2 flex items-center gap-1.5 text-xs font-medium text-gris transition hover:text-tinta"
+      >
+        <LogOut size={14} className="shrink-0" />
+        Salir
+      </button>
+    </div>
   );
 }
 
 function Marca() {
   return (
     <div className="flex items-center gap-2.5 border-b border-borde px-4 py-3.5">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-chip bg-acento text-white">
-        <Building2 size={19} />
-      </span>
+      <img src={logo3f} alt="" className="h-9 w-9 shrink-0 rounded-chip" />
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold leading-tight text-tinta">Coordinación</p>
         <p className="truncate text-[11px] leading-tight text-tenue">Municipio de Tres de Febrero</p>
@@ -106,7 +147,15 @@ export function Layout() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* min-h-0: sin esto, un flex item en columna no se achica por debajo
+          de la altura natural de su contenido (default `min-height: auto`
+          de flexbox). Con una pantalla con mucho contenido —como "Proyectos
+          y compromisos de esta ventana" en Monitoreo, que puede crecer
+          bastante al abrir un proyecto o un compromiso— este div terminaba
+          estirándose para darle lugar a #contenido en vez de dejarlo
+          scrollear solo, y aparecía un segundo scroll: el de la ventana del
+          navegador entera, encima del de #contenido. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <button
           type="button"
           onClick={() => setMenuAbierto((v) => !v)}
@@ -133,7 +182,12 @@ export function EncabezadoPagina({ titulo, descripcion, acciones, children }) {
           <h1 className="text-lg font-semibold leading-tight text-tinta">{titulo}</h1>
           {descripcion && <p className="mt-0.5 text-sm text-gris">{descripcion}</p>}
         </div>
-        {acciones && <div className="no-imprimir flex flex-wrap items-center gap-2">{acciones}</div>}
+        {/* ml-auto (no solo justify-between del padre): cuando el título+descripción
+            ocupan toda la línea y las acciones envuelven solas a la línea de abajo,
+            justify-between no tiene con qué "repartir" espacio con un solo bloque en
+            esa línea y las deja pegadas a la izquierda. ml-auto sí empuja el bloque
+            entero al margen derecho aunque quede solo en su línea. */}
+        {acciones && <div className="no-imprimir flex flex-wrap items-center gap-2 ml-auto">{acciones}</div>}
       </div>
       {children}
     </div>

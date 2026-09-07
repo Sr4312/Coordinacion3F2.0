@@ -166,6 +166,24 @@ export async function guardarCatalogo(nombre, items) {
   return persistir();
 }
 
+/* ── Asignación de áreas por persona ─────────────────────────────────── */
+
+/**
+ * Reemplaza, de una sola vez, qué áreas monitorea `usuario`. No es un alta ni
+ * una baja incremental a propósito: la pantalla es un check-list con un solo
+ * botón «Guardar», así que lo natural es mandar la lista completa deseada y
+ * pisar la anterior — igual que `guardarCatalogo`. Sin login real, `usuario`
+ * es el nombre libre de `config.usuario`; no lleva bitácora porque es
+ * preferencia de quien usa el sistema, no dato de gestión institucional.
+ */
+export async function guardarAsignacionesMonitoreo(usuario, areas) {
+  const bd = await obtenerBD();
+  const deOtros = (bd.asignaciones_monitoreo ?? []).filter((a) => a.usuario !== usuario);
+  const propias = areas.map((area) => ({ usuario, area }));
+  bd.asignaciones_monitoreo = [...deOtros, ...propias];
+  return persistir();
+}
+
 /* ── Proyectos ──────────────────────────────────────────────────────── */
 
 export async function crearProyecto(datos) {
@@ -260,6 +278,168 @@ async function asegurarCatalogo(nombreCatalogo, item) {
   return item;
 }
 
+/** Genera un id de catálogo estable a partir de un nombre real, sin acentos ni espacios. */
+function idDesdeNombre(prefijo, nombre) {
+  const SIN_ACENTOS = /[̀-ͯ]/g; // marcas diacríticas tras normalize('NFD')
+  const slug = nombre
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(SIN_ACENTOS, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return `${prefijo}_${slug}`;
+}
+
+/**
+ * Traduce el `Estado` tal como está escrito en un `_db` real al vocabulario
+ * cerrado del catálogo (`ESTADOS_PROYECTO`). Nunca inventa silenciosamente: si
+ * el valor real no es uno de los cinco estados o no está cargado, devuelve una
+ * `nota` con el valor original para que quede en observaciones.
+ */
+function mapearEstado(estadoCrudo) {
+  const CANONICOS = new Set(['planificado', 'en ejecución', 'demorado', 'finalizado', 'suspendido']);
+  const normalizado = (estadoCrudo ?? '').trim().toLowerCase();
+  if (CANONICOS.has(normalizado)) return { estado: normalizado, nota: null };
+
+  const EQUIVALENCIAS = {
+    pendiente: 'planificado',
+    programado: 'planificado',
+    alerta: 'demorado',
+    'crítico': 'demorado',
+    critico: 'demorado',
+    'por debajo del objetivo': 'demorado',
+  };
+  if (EQUIVALENCIAS[normalizado]) {
+    return { estado: EQUIVALENCIAS[normalizado], nota: `Estado real en el sheet: "${estadoCrudo}".` };
+  }
+  return {
+    estado: 'planificado',
+    nota: estadoCrudo
+      ? `Estado no interpretable en el sheet ("${estadoCrudo}") — revisar con el área.`
+      : 'Estado no cargado en el sheet — revisar con el área.',
+  };
+}
+
+/* ── Datos reales de las siete secretarías (no sintéticos) ─────────────── */
+
+/**
+ * Da de alta, como proyectos reales, los relevados de la pestaña "Estado de
+ * proyectos" de cada `_db` (ver `datos/proyectos-reales-secretarias.js`).
+ *
+ * Mismo patrón que `cargarProyectosPosicionamientoReales()`: aditivo (no
+ * reemplaza nada) e idempotente (no duplica si el proyecto ya está cargado
+ * para esa área+programa+proyecto). Asegura primero los catálogos de área que
+ * necesita cada secretaría, y de paso da de alta cualquier programa real que
+ * aparezca en los datos y todavía no exista en el catálogo — así la interfaz
+ * queda programada para leer lo que haya, no una lista fija de programas
+ * elegidos de antemano.
+ *
+ * El eje se fija en "Puntual" para todos: la pestaña maestra no trae esa
+ * columna (ver nota en `proyectos-reales-secretarias.js`).
+ */
+async function cargarListaDeSecretarias(secretarias, ejePorDefecto) {
+  const resumen = {};
+  await enLote(async () => {
+    for (const secretaria of secretarias) {
+      const bd = await obtenerBD();
+      const area = await asegurarCatalogo('areas', { ...secretaria.area, activo: true });
+
+      // El tipo es uno solo por secretaría, así que se resuelve una vez.
+      const tipo = (bd.catalogos?.tipos ?? []).find((t) => t.nombre === secretaria.tipoDefault);
+      const esObra = Boolean(tipo?.es_obra);
+
+      const yaCargados = new Set(
+        (bd.proyectos ?? [])
+          .filter((p) => p.activo !== false && p.area === area.nombre)
+          .map((p) => `${p.programa}||${p.proyecto}`),
+      );
+
+      let creados = 0;
+      for (const real of secretaria.datos) {
+        const clave = `${real.programa}||${real.proyecto}`;
+        if (yaCargados.has(clave)) continue;
+        // Sin esto, dos filas iguales dentro de la MISMA lista entrarían las
+        // dos: `yaCargados` se arma una sola vez, antes del bucle.
+        yaCargados.add(clave);
+
+        const programa = await asegurarCatalogo('programas', {
+          id: idDesdeNombre('pr', real.programa),
+          nombre: real.programa,
+          activo: true,
+        });
+        // El eje del dato manda cuando existe; el por defecto es para las
+        // fuentes que no traen la columna.
+        const eje = await asegurarCatalogo('ejes', {
+          id: idDesdeNombre('ej', real.eje ?? ejePorDefecto),
+          nombre: real.eje ?? ejePorDefecto,
+          activo: true,
+        });
+        const { estado, nota } = mapearEstado(real.estado);
+
+        await crearProyecto({
+          proyecto: real.proyecto,
+          area: area.nombre,
+          id_area: area.id,
+          programa: programa.nombre,
+          eje: eje.nombre,
+          tipo: secretaria.tipoDefault,
+          // `es_obra` NO se deduce solo del tipo en ningún lado: el importador
+          // por CSV lo calcula al validar, pero este loader no pasaba por ahí y
+          // dejaba el campo en false. Resultado: los proyectos de Obras existían
+          // pero no aparecían ni en el módulo de Obras ni en el mapa, porque los
+          // dos filtran por `es_obra`.
+          es_obra: esObra,
+          estado,
+          observaciones: [real.comentarios, nota].filter(Boolean).join(' '),
+          fecha_carga: real.fechaActualizacion,
+        });
+        creados += 1;
+      }
+      resumen[area.nombre] = (resumen[area.nombre] ?? 0) + creados;
+    }
+  });
+
+  return resumen;
+}
+
+export async function cargarProyectosRealesSecretarias() {
+  const { SECRETARIAS_REALES } = await import('./proyectos-reales-secretarias.js');
+  return cargarListaDeSecretarias(SECRETARIAS_REALES, 'Puntual');
+}
+
+/**
+ * Da de alta los proyectos VALIDADOS de la pestaña "1. Cualitativo" (ver
+ * `datos/proyectos-validados-cualitativo.js`).
+ *
+ * Es la otra mitad de los datos reales, y la de mejor calidad: a diferencia de
+ * los del maestro, cada uno fue revisado uno por uno contra la lista oficial de
+ * programas, y trae su `eje` real en vez del "Puntual" de aproximación.
+ *
+ * Mismo contrato que el otro loader: aditivo e idempotente. Si un proyecto ya
+ * entró por el maestro con el mismo programa y nombre, no se duplica — y el que
+ * quedó es el del maestro, con su eje aproximado. Por eso conviene correr este
+ * PRIMERO, que es lo que hace `cargarTodosLosProyectosReales()`.
+ */
+export async function cargarProyectosValidadosCualitativo() {
+  const { SECRETARIAS_VALIDADAS } = await import('./proyectos-validados-cualitativo.js');
+  return cargarListaDeSecretarias(SECRETARIAS_VALIDADAS, 'POA');
+}
+
+/** Carga de un saque los datos reales de Posicionamiento y de las siete secretarías. */
+export async function cargarTodosLosProyectosReales() {
+  const creadosPosicionamiento = await cargarProyectosPosicionamientoReales();
+  // Los validados van primero a propósito: traen el eje real, así que si un
+  // proyecto está en las dos fuentes conviene que gane esta.
+  const resumenValidados = await cargarProyectosValidadosCualitativo();
+  const resumenSecretarias = await cargarProyectosRealesSecretarias();
+  const resumen = { Posicionamiento: creadosPosicionamiento };
+  for (const [area, n] of [...Object.entries(resumenValidados), ...Object.entries(resumenSecretarias)]) {
+    resumen[area] = (resumen[area] ?? 0) + n;
+  }
+  return resumen;
+}
+
 /* ── Proyectos estratégicos ─────────────────────────────────────────── */
 
 /**
@@ -321,34 +501,34 @@ export async function promoverAEstrategico({ origen_tipo, id_origen, id_proyecto
   });
 }
 
-/* ── Posicionamiento internacional ──────────────────────────────────── */
+/* ── Posicionamiento ────────────────────────────────────────────────── */
 
 /**
- * Alta de una acción de posicionamiento internacional.
+ * Alta de un proyecto de posicionamiento.
  *
  * Colección propia y no un proyecto de la base maestra: un hermanamiento o una
  * postulación a un fondo no tienen objetivo, unidad ni avance físico, y
  * forzarlos a ese molde llenaba la base maestra de proyectos con campos vacíos.
  * El vínculo a un proyecto es opcional y va en un solo sentido.
  */
-export async function crearAccionInternacional(datos) {
+export async function crearProyectoPosicionamiento(datos) {
   return crear(
-    'acciones_internacionales',
+    'proyectos_posicionamiento',
     { estado: 'identificada', ods: [], ids_proyecto: [], ...datos },
     { id_proyecto: datos.ids_proyecto?.[0] ?? null },
   );
 }
 
-export async function actualizarAccionInternacional(id, cambios) {
+export async function actualizarProyectoPosicionamiento(id, cambios) {
   const bd = await obtenerBD();
-  const previa = bd.acciones_internacionales.find((a) => a.id === id);
-  return actualizar('acciones_internacionales', id, cambios, {
+  const previa = bd.proyectos_posicionamiento.find((a) => a.id === id);
+  return actualizar('proyectos_posicionamiento', id, cambios, {
     id_proyecto: (cambios.ids_proyecto ?? previa?.ids_proyecto)?.[0] ?? null,
   });
 }
 
-export async function bajaAccionInternacional(id) {
-  return bajaLogica('acciones_internacionales', id);
+export async function bajaProyectoPosicionamiento(id) {
+  return bajaLogica('proyectos_posicionamiento', id);
 }
 
 /* ── Seguimientos ───────────────────────────────────────────────────── */
@@ -397,6 +577,30 @@ export async function marcarCumplido(id, fecha) {
   return actualizarCompromiso(id, { estado: 'cumplido', fecha_cumplimiento: fecha });
 }
 
+/**
+ * Actualiza estado y descripción de un compromiso YA EXISTENTE, sin pasar por
+ * el tema/seguimiento que lo originó — es el camino de "Actualizar
+ * compromiso" en Monitoreo y del detalle desplegable de Seguimiento, donde se
+ * corrige un compromiso sin abrir el módulo donde nació.
+ *
+ * Gestiona sola `fecha_cumplimiento`: la estampa con `hoy` al entrar a
+ * cumplido (si no traía una de antes) y la limpia al salir de cumplido — así
+ * nunca queda una fecha de cumplimiento colgada de un compromiso que dejó de
+ * estarlo.
+ */
+export async function actualizarEstadoCompromiso(id, { estado, descripcion }, hoy = hoyISO()) {
+  const bd = await obtenerBD();
+  const previo = bd.compromisos.find((c) => c.id === id);
+  if (!previo) throw new Error(`No existe el compromiso ${id}`);
+
+  const cambios = { descripcion };
+  if (estado !== previo.estado) {
+    cambios.estado = estado;
+    cambios.fecha_cumplimiento = estado === 'cumplido' ? previo.fecha_cumplimiento || hoy : null;
+  }
+  return actualizarCompromiso(id, cambios);
+}
+
 /* ── Monitoreos ─────────────────────────────────────────────────────── */
 
 export async function crearMonitoreo(datos) {
@@ -423,13 +627,20 @@ export async function agregarTema(idMonitoreo, tema) {
     );
 
     let compromiso = null;
-    if (tema.requiere_accion) {
+    // Si el tema ya viene vinculado a un compromiso que existía de antes
+    // (elegido de la lista del proyecto), no corresponde generar uno nuevo
+    // aunque requiere_accion llegara en true por algún camino que no lo
+    // haya limpiado — son excluyentes.
+    if (tema.requiere_accion && !tema.compromiso_existente) {
       compromiso = await crearCompromiso({
         origen_tipo: 'monitoreo',
         id_origen: idMonitoreo,
         id_proyecto: tema.id_proyecto ?? null,
         area: monitoreo.area,
-        descripcion: tema.descripcion,
+        // La descripción del compromiso puede ser distinta a la del tema — el
+        // tema cuenta qué pasó, el compromiso qué hay que hacer. Si no se
+        // completó la propia, se usa la del tema como antes.
+        descripcion: tema.descripcion_compromiso || tema.descripcion,
         responsable: tema.responsable,
         fecha_limite: tema.fecha_limite,
       });
@@ -448,6 +659,13 @@ export async function agregarTema(idMonitoreo, tema) {
  * responsable o la fecha del tema sin tocar el compromiso dejaba las dos
  * versiones peleadas, marcar la acción después no creaba nada, y desmarcarla
  * dejaba un compromiso vivo por un tema que ya no lo pedía.
+ *
+ * `compromiso_existente` distingue los dos sentidos que puede tener
+ * `id_compromiso`: `false` (o ausente, temas viejos) es el compromiso que
+ * ESTE tema generó y del que es dueño —se crea, actualiza o da de baja en
+ * sincronía, como siempre—; `true` es un compromiso que YA EXISTÍA, elegido
+ * a mano de la lista del proyecto vinculado —acá el tema sólo guarda la
+ * referencia, nunca gestiona su ciclo de vida.
  */
 export async function actualizarTema(id, cambios) {
   const bd = await obtenerBD();
@@ -460,14 +678,27 @@ export async function actualizarTema(id, cambios) {
       id_proyecto: cambios.id_proyecto ?? previo.id_proyecto ?? null,
     });
 
+    // El compromiso propio que este tema ya tenía deja de tener dueño si el
+    // tema pasa a referenciar otra cosa (o nada) — se da de baja antes de
+    // decidir el estado nuevo, para no dejarlo huérfano.
+    const teniaPropio = Boolean(previo.id_compromiso) && !previo.compromiso_existente;
+    const sigueApuntandoIgual = tema.id_compromiso === previo.id_compromiso;
+    if (teniaPropio && !sigueApuntandoIgual) {
+      await bajaLogica('compromisos', previo.id_compromiso);
+    }
+
+    if (tema.compromiso_existente) return tema;
+
     const datos = {
-      descripcion: tema.descripcion,
+      // Ídem `agregarTema()`: la descripción propia del compromiso, si se
+      // cargó, no la del tema.
+      descripcion: tema.descripcion_compromiso || tema.descripcion,
       responsable: tema.responsable,
       fecha_limite: tema.fecha_limite || null,
       id_proyecto: tema.id_proyecto ?? null,
     };
 
-    if (tema.requiere_accion && !previo.id_compromiso) {
+    if (tema.requiere_accion && !(teniaPropio && sigueApuntandoIgual)) {
       const compromiso = await crearCompromiso({
         origen_tipo: 'monitoreo',
         id_origen: previo.id_monitoreo,
@@ -480,7 +711,7 @@ export async function actualizarTema(id, cambios) {
       await actualizarCompromiso(previo.id_compromiso, datos);
       return tema;
     }
-    if (previo.id_compromiso) {
+    if (teniaPropio && sigueApuntandoIgual) {
       // Baja lógica, no borrado: el sistema no borra nada, y el asiento de
       // bitácora deja constancia de por qué ese compromiso dejó de contar.
       await bajaLogica('compromisos', previo.id_compromiso);
